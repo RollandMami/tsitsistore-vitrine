@@ -1,0 +1,87 @@
+name: Failover Automatique — Tsitsi Store
+
+on:
+  # Déclenché par UptimeRobot via webhook
+  repository_dispatch:
+    types: [site-down, site-up]
+
+  # Permet aussi de déclencher manuellement depuis GitHub
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action à effectuer'
+        required: true
+        default: 'site-down'
+        type: choice
+        options:
+          - site-down
+          - site-up
+
+jobs:
+  failover:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Déterminer l'action
+        id: action
+        run: |
+          # Récupère l'action depuis webhook ou déclenchement manuel
+          ACTION="${{ github.event.action || github.event.inputs.action }}"
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "Action détectée : $ACTION"
+
+      # ============================================================
+      # SITE DOWN — Pointer No-IP vers GitHub Pages (vitrine)
+      # ============================================================
+      - name: 🔴 SITE DOWN — Basculer vers le site vitrine
+        if: steps.action.outputs.action == 'site-down'
+        run: |
+          echo "⚠️  Site principal DOWN — Basculement vers GitHub Pages..."
+
+          # IP de GitHub Pages (stable, vérifiée)
+          GITHUB_PAGES_IP="185.199.108.153"
+
+          # Mise à jour No-IP vers GitHub Pages
+          RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
+            "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}&myip=${GITHUB_PAGES_IP}")
+
+          echo "Réponse No-IP : $RESPONSE"
+
+          # Vérification
+          if echo "$RESPONSE" | grep -q "good\|nochg"; then
+            echo "✅ Basculement réussi — DNS pointe vers GitHub Pages (${GITHUB_PAGES_IP})"
+          else
+            echo "❌ Erreur lors du basculement"
+            exit 1
+          fi
+
+      # ============================================================
+      # SITE UP — Remettre No-IP vers le serveur Tana
+      # ============================================================
+      - name: 🟢 SITE UP — Remettre vers le serveur principal
+        if: steps.action.outputs.action == 'site-up'
+        run: |
+          echo "✅ Site principal UP — Retour au serveur Tana..."
+
+          # Récupère l'IP publique actuelle du serveur Tana
+          # Note : remplace cette IP par ton IP fixe si tu en as une
+          # Sinon No-IP la détecte automatiquement depuis le serveur lui-même
+          RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
+            "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}")
+
+          echo "Réponse No-IP : $RESPONSE"
+
+          if echo "$RESPONSE" | grep -q "good\|nochg"; then
+            echo "✅ DNS remis vers le serveur principal"
+          else
+            echo "❌ Erreur lors du retour"
+            exit 1
+          fi
+
+      - name: Résumé
+        run: |
+          echo "================================================"
+          echo "Action effectuée : ${{ steps.action.outputs.action }}"
+          echo "Hostname : ${{ secrets.NOIP_HOSTNAME }}"
+          echo "Timestamp : $(date)"
+          echo "================================================"
