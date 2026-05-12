@@ -1,11 +1,8 @@
 name: Failover Automatique — Tsitsi Store
 
 on:
-  # Vérification automatique toutes les 5 minutes
   schedule:
     - cron: '*/5 * * * *'
-
-  # Déclenchement manuel depuis GitHub si besoin
   workflow_dispatch:
     inputs:
       force_action:
@@ -24,9 +21,9 @@ jobs:
 
     steps:
       # ============================================================
-      # ÉTAPE 1 — Vérifier le statut via UptimeRobot API
+      # ÉTAPE 1 — Vérifier le statut via UptimeRobot
       # ============================================================
-      - name: Vérifier le statut du site via UptimeRobot
+      - name: Vérifier le statut via UptimeRobot
         id: check
         run: |
           RESPONSE=$(curl -s -X POST "https://api.uptimerobot.com/v2/getMonitors" \
@@ -61,17 +58,24 @@ jobs:
       - name: Lire l'état actuel du DNS
         id: current_state
         run: |
+          # IP actuelle du hostname
           CURRENT_IP=$(dig +short ${{ secrets.NOIP_HOSTNAME }} | head -1)
-          echo "IP actuelle : $CURRENT_IP"
+          echo "IP actuelle du hostname : $CURRENT_IP"
           echo "current_ip=$CURRENT_IP" >> $GITHUB_OUTPUT
 
-          GITHUB_IP="185.199.108.153"
+          # Toutes les IPs GitHub Pages (dynamique — ne jamais coder en dur)
+          GITHUB_IPS=$(dig +short rollandmami.github.io)
+          GITHUB_IP=$(echo "$GITHUB_IPS" | head -1)
+          echo "IPs GitHub Pages : $GITHUB_IPS"
           echo "github_ip=$GITHUB_IP" >> $GITHUB_OUTPUT
 
-          if [ "$CURRENT_IP" = "$GITHUB_IP" ]; then
+          # Vérifier si l'IP actuelle est une IP GitHub Pages
+          if echo "$GITHUB_IPS" | grep -q "$CURRENT_IP"; then
             echo "dns_state=vitrine" >> $GITHUB_OUTPUT
+            echo "DNS pointe vers VITRINE (GitHub Pages)"
           else
             echo "dns_state=principal" >> $GITHUB_OUTPUT
+            echo "DNS pointe vers SERVEUR PRINCIPAL ($CURRENT_IP)"
           fi
 
       # ============================================================
@@ -83,7 +87,10 @@ jobs:
           steps.current_state.outputs.dns_state == 'principal'
         run: |
           echo "Site DOWN — Basculement vers GitHub Pages..."
+
+          # IP GitHub Pages résolue dynamiquement
           GITHUB_IP="${{ steps.current_state.outputs.github_ip }}"
+          echo "IP GitHub Pages utilisée : $GITHUB_IP"
 
           RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
             "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}&myip=${GITHUB_IP}")
@@ -107,6 +114,7 @@ jobs:
         run: |
           echo "Site UP — Retour au serveur principal..."
 
+          # No-IP détecte automatiquement l'IP publique du serveur
           RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
             "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}")
 
@@ -127,4 +135,5 @@ jobs:
           echo "Statut UptimeRobot : ${{ steps.check.outputs.status }} (2=UP 8=SeemsDown 9=DOWN)"
           echo "État DNS           : ${{ steps.current_state.outputs.dns_state }}"
           echo "IP actuelle        : ${{ steps.current_state.outputs.current_ip }}"
+          echo "IP GitHub Pages    : ${{ steps.current_state.outputs.github_ip }}"
           echo "Timestamp          : $(date)"
