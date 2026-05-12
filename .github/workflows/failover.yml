@@ -13,7 +13,6 @@ on:
         options:
           - auto
           - force-down
-          - force-up
 
 jobs:
   check_and_failover:
@@ -29,8 +28,6 @@ jobs:
           RESPONSE=$(curl -s -X POST "https://api.uptimerobot.com/v2/getMonitors" \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "api_key=${{ secrets.UPTIMEROBOT_API_KEY }}&format=json&logs=0")
-
-          echo "Réponse UptimeRobot : $RESPONSE"
 
           STATUS=$(echo "$RESPONSE" | python3 -c "
           import sys, json
@@ -48,8 +45,6 @@ jobs:
           FORCE="${{ github.event.inputs.force_action }}"
           if [ "$FORCE" = "force-down" ]; then
             echo "status=9" >> $GITHUB_OUTPUT
-          elif [ "$FORCE" = "force-up" ]; then
-            echo "status=2" >> $GITHUB_OUTPUT
           fi
 
       # ============================================================
@@ -58,18 +53,16 @@ jobs:
       - name: Lire l'état actuel du DNS
         id: current_state
         run: |
-          # IP actuelle du hostname
           CURRENT_IP=$(dig +short ${{ secrets.NOIP_HOSTNAME }} | head -1)
-          echo "IP actuelle du hostname : $CURRENT_IP"
+          echo "IP actuelle : $CURRENT_IP"
           echo "current_ip=$CURRENT_IP" >> $GITHUB_OUTPUT
 
-          # Toutes les IPs GitHub Pages (dynamique — ne jamais coder en dur)
+          # IPs GitHub Pages résolues dynamiquement
           GITHUB_IPS=$(dig +short rollandmami.github.io)
           GITHUB_IP=$(echo "$GITHUB_IPS" | head -1)
           echo "IPs GitHub Pages : $GITHUB_IPS"
           echo "github_ip=$GITHUB_IP" >> $GITHUB_OUTPUT
 
-          # Vérifier si l'IP actuelle est une IP GitHub Pages
           if echo "$GITHUB_IPS" | grep -q "$CURRENT_IP"; then
             echo "dns_state=vitrine" >> $GITHUB_OUTPUT
             echo "DNS pointe vers VITRINE (GitHub Pages)"
@@ -79,7 +72,9 @@ jobs:
           fi
 
       # ============================================================
-      # ÉTAPE 3A — SITE DOWN → Basculer vers GitHub Pages
+      # ÉTAPE 3 — SITE DOWN → Basculer vers GitHub Pages
+      # Note : Le retour vers le serveur principal est géré
+      # automatiquement par noip2 installé sur le serveur
       # ============================================================
       - name: SITE DOWN — Basculer vers la vitrine
         if: |
@@ -87,10 +82,7 @@ jobs:
           steps.current_state.outputs.dns_state == 'principal'
         run: |
           echo "Site DOWN — Basculement vers GitHub Pages..."
-
-          # IP GitHub Pages résolue dynamiquement
           GITHUB_IP="${{ steps.current_state.outputs.github_ip }}"
-          echo "IP GitHub Pages utilisée : $GITHUB_IP"
 
           RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
             "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}&myip=${GITHUB_IP}")
@@ -105,29 +97,6 @@ jobs:
           fi
 
       # ============================================================
-      # ÉTAPE 3B — SITE UP → Remettre vers le serveur principal
-      # ============================================================
-      - name: SITE UP — Remettre vers le serveur principal
-        if: |
-          steps.check.outputs.status == '2' &&
-          steps.current_state.outputs.dns_state == 'vitrine'
-        run: |
-          echo "Site UP — Retour au serveur principal..."
-
-          # No-IP détecte automatiquement l'IP publique du serveur
-          RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
-            "https://dynupdate.no-ip.com/nic/update?hostname=${{ secrets.NOIP_HOSTNAME }}")
-
-          echo "Réponse No-IP : $RESPONSE"
-
-          if echo "$RESPONSE" | grep -q "good\|nochg"; then
-            echo "DNS remis vers le serveur principal"
-          else
-            echo "Erreur lors du retour"
-            exit 1
-          fi
-
-      # ============================================================
       # ÉTAPE 4 — Résumé
       # ============================================================
       - name: Résumé
@@ -137,3 +106,6 @@ jobs:
           echo "IP actuelle        : ${{ steps.current_state.outputs.current_ip }}"
           echo "IP GitHub Pages    : ${{ steps.current_state.outputs.github_ip }}"
           echo "Timestamp          : $(date)"
+          echo ""
+          echo "Note : Le retour vers le serveur principal est géré"
+          echo "automatiquement par noip2 sur le serveur."
