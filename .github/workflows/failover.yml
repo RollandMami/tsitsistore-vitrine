@@ -19,9 +19,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
-      # ÉTAPE 1 — Vérifier le statut via UptimeRobot
-      # ============================================================
       - name: Vérifier le statut via UptimeRobot
         id: check
         run: |
@@ -47,9 +44,6 @@ jobs:
             echo "status=9" >> $GITHUB_OUTPUT
           fi
 
-      # ============================================================
-      # ÉTAPE 2 — Lire l'état actuel du DNS
-      # ============================================================
       - name: Lire l'état actuel du DNS
         id: current_state
         run: |
@@ -57,31 +51,26 @@ jobs:
           echo "IP actuelle : $CURRENT_IP"
           echo "current_ip=$CURRENT_IP" >> $GITHUB_OUTPUT
 
-          # IPs Cloudflare Worker résolues dynamiquement
-          WORKER_IPS=$(dig +short tsitsistore-failover.andrianavalonarolland.workers.dev)
+          # IPs GitHub Pages résolues dynamiquement
+          WORKER_IPS=$(dig +short rollandmami.github.io)
           WORKER_IP=$(echo "$WORKER_IPS" | head -1)
-          echo "IPs Cloudflare Worker : $WORKER_IPS"
+          echo "IPs GitHub Pages : $WORKER_IPS"
           echo "worker_ip=$WORKER_IP" >> $GITHUB_OUTPUT
 
           if echo "$WORKER_IPS" | grep -q "$CURRENT_IP"; then
             echo "dns_state=vitrine" >> $GITHUB_OUTPUT
-            echo "DNS pointe vers VITRINE (Cloudflare Worker)"
+            echo "DNS pointe vers VITRINE (GitHub Pages)"
           else
             echo "dns_state=principal" >> $GITHUB_OUTPUT
             echo "DNS pointe vers SERVEUR PRINCIPAL ($CURRENT_IP)"
           fi
 
-      # ============================================================
-      # ÉTAPE 3 — SITE DOWN → Basculer vers Cloudflare Worker
-      # Note : Le retour vers le serveur principal est géré
-      # automatiquement par noip2 installé sur le serveur
-      # ============================================================
       - name: SITE DOWN — Basculer vers la vitrine
         if: |
           (steps.check.outputs.status == '9' || steps.check.outputs.status == '8') &&
           steps.current_state.outputs.dns_state == 'principal'
         run: |
-          echo "Site DOWN — Basculement vers Cloudflare Worker..."
+          echo "Site DOWN — Basculement vers GitHub Pages..."
           WORKER_IP="${{ steps.current_state.outputs.worker_ip }}"
 
           RESPONSE=$(curl -s -u "${{ secrets.NOIP_USERNAME }}:${{ secrets.NOIP_PASSWORD }}" \
@@ -90,21 +79,18 @@ jobs:
           echo "Réponse No-IP : $RESPONSE"
 
           if echo "$RESPONSE" | grep -q "good\|nochg"; then
-            echo "Basculement réussi vers Cloudflare Worker (${WORKER_IP})"
+            echo "Basculement réussi vers GitHub Pages (${WORKER_IP})"
           else
             echo "Erreur lors du basculement"
             exit 1
           fi
 
-      # ============================================================
-      # ÉTAPE 4 — Résumé
-      # ============================================================
       - name: Résumé
         run: |
           echo "Statut UptimeRobot : ${{ steps.check.outputs.status }} (2=UP 8=SeemsDown 9=DOWN)"
           echo "État DNS           : ${{ steps.current_state.outputs.dns_state }}"
           echo "IP actuelle        : ${{ steps.current_state.outputs.current_ip }}"
-          echo "IP Worker          : ${{ steps.current_state.outputs.worker_ip }}"
+          echo "IP GitHub Pages    : ${{ steps.current_state.outputs.worker_ip }}"
           echo "Timestamp          : $(date)"
           echo ""
           echo "Note : Le retour vers le serveur principal est géré"
